@@ -1,4 +1,4 @@
-const rawApiBase = (import.meta.env.VITE_API_BASE_URL || '/api').trim().replace(/\/+$/, '')
+const rawApiBase = (import.meta.env.VITE_API_BASE_URL || 'https://pulpiai.onrender.com/api').trim().replace(/\/+$/, '')
 const API_BASE = rawApiBase.endsWith('/api') ? rawApiBase : `${rawApiBase}/api`
 
 export type MovementType = 'income' | 'expense'
@@ -98,16 +98,30 @@ export const api = {
   },
 
   async login(identifier: string, password: string): Promise<{ success: boolean; user: User; token: string }> {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier, password }),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Credenciales inválidas' }))
-      throw new Error(err.detail || 'Error al iniciar sesión')
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Credenciales inválidas' }))
+        throw new Error(err.detail || 'Error al iniciar sesión')
+      }
+      const data = await res.json()
+      if (!data || !data.success) {
+        throw new Error('Credenciales inválidas')
+      }
+      return data
+    } catch (err: any) {
+      clearTimeout(timeoutId)
+      throw err
     }
-    return res.json()
   },
 
   // Transactions
