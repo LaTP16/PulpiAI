@@ -2,7 +2,11 @@ node_modules/
 dist/
 build/
 .cache/
-.env*
+.env
+.env.*
+!.env.example
+.venv/
+backend/.venv/
 .vite/
 vite.config.*.timestamp-*
 *.tsbuildinfo
@@ -27,4 +31,5 @@ __pycache__/
 .pytest_cache/
 *.db
 backend/kipu.db
+backend/pulpi.db
 backend/.env

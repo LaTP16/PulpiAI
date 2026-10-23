@@ -38,7 +38,7 @@ class AuthService:
             )
 
             # Generate lightweight session token
-            token = f"kipu_token_{uuid.uuid4().hex}"
+            token = f"pulpi_token_{uuid.uuid4().hex}"
 
             return LoginResponse(
                 success=True,

@@ -1,12 +1,14 @@
-# KipuAI - Sistema de Gestión de Gastos e Ingresos
+# PulpiAI - Sistema de Gestión de Gastos e Ingresos con IA
 
-KipuAI es una aplicación de gestión financiera para emprendedores y microempresas, equipada con reconocimiento de transacciones por voz y análisis inteligente de comprobantes mediante OCR.
+> **Desafío 4:** *"Asistente de IA por voz e imagen que digitaliza ingresos y gastos de pequeños negocios informales para ordenar sus finanzas y facilitar su acceso al crédito."*
+
+**PulpiAI** es una aplicación de gestión financiera para emprendedores y microempresas informales, equipada con reconocimiento de transacciones por voz, análisis inteligente de comprobantes mediante OCR y un asistente financiero conversacional impulsado por Inteligencia Artificial (Gemini).
 
 ---
 
 ## Estructura del Proyecto
 
-El proyecto está organizado en dos módulos independientes:
+El proyecto está organizado en dos módulos independientes listos para despliegue en **Vercel** (Frontend) y **Render** (Backend):
 
 ```text
 PulpiAI/
@@ -20,13 +22,14 @@ PulpiAI/
 │   ├── public/                   # Activos estáticos
 │   ├── index.html                # Plantilla HTML
 │   ├── package.json              # Dependencias del frontend
+│   ├── vercel.json               # Configuración de despliegue en Vercel
 │   └── vite.config.ts            # Configuración de Vite con proxy /api -> backend:8000
 │
 ├── backend/                      # API REST con Python y FastAPI
 │   ├── app/
 │   │   ├── main.py               # Aplicación principal FastAPI, CORS y ciclo de vida
 │   │   ├── core/
-│   │   │   ├── config.py         # Configuración y variables de entorno
+│   │   │   ├── config.py         # Configuración y variables de entorno (incluye GEMINI_API_KEY)
 │   │   │   └── security.py       # Hash seguro de contraseñas (PBKDF2-HMAC-SHA256)
 │   │   ├── database/
 │   │   │   ├── session.py        # Conexión SQLite con WAL mode y transacciones ACID
@@ -37,16 +40,16 @@ PulpiAI/
 │   │   │   ├── auth_service.py   # Servicio de autenticación
 │   │   │   ├── transaction_service.py # Lógica de movimientos, saldo y balance
 │   │   │   ├── voice_service.py  # Reconocimiento y extracción precisa de montos por voz
-│   │   │   └── ocr_service.py    # Preprocesamiento, OCR y clasificación de comprobantes
-│   │   └── api/                  # Endpoints REST (/auth, /transactions, /voice, /ocr)
+│   │   │   ├── ocr_service.py    # Preprocesamiento, OCR y clasificación de comprobantes
+│   │   │   └── ai_service.py     # Asistente financiero conversacional con Gemini API
+│   │   └── api/                  # Endpoints REST (/auth, /transactions, /voice, /ocr, /assistant)
 │   ├── tests/                    # Pruebas automatizadas con pytest
-│   │   ├── test_auth.py          # Pruebas de autenticación y cuenta demo
-│   │   ├── test_voice.py         # Pruebas de extracción de montos y tipos por voz
-│   │   ├── test_ocr.py           # Pruebas de clasificación de comprobantes y total OCR
-│   │   └── test_transactions.py  # Pruebas de persistencia, saldo y no duplicación
+│   ├── Procfile                  # Comando de inicio para Render / PaaS
 │   ├── requirements.txt          # Dependencias de Python
 │   └── .env.example              # Variables de entorno de ejemplo
 │
+├── render.yaml                   # Blueprint para despliegue automático en Render
+├── vercel.json                   # Configuración para despliegue en Vercel desde la raíz
 ├── package.json                  # Scripts globales de conveniencia
 ├── README.md                     # Documentación general
 └── .gitignore
@@ -56,14 +59,13 @@ PulpiAI/
 
 ## 1. Acceso de Prueba (Credenciales Predeterminadas)
 
-El sistema incluye una cuenta de prueba para que los testers ingresen de inmediato sin tener que digitar credenciales:
+El sistema incluye una cuenta de prueba para que los evaluadores ingresen de inmediato sin tener que digitar credenciales:
 
 - **Usuario / Correo:** `maria@gmail.com` (o celular `976345234`)
 - **Contraseña:** `comerciante123`
 - **Nombre:** María Rodríguez
 - **Negocio:** Bodega Mi Esquina
 - **Modo:** Al abrir el login, los campos ya aparecen pre-rellenados. Solo debes hacer clic en **«Ingresar»**.
-- La cuenta y su contraseña con hash seguro se inicializan automáticamente en la base de datos al arrancar el backend.
 
 ---
 
@@ -78,19 +80,17 @@ Al acceder a la cuenta de prueba, se presentan movimientos de ejemplo distribuid
 
 ---
 
-## 3. Reconocimiento de Voz Corregido
+## 3. Reconocimiento de Voz
 
 El módulo de voz (`app/services/voice_service.py`) analiza transcripciones habladas o escritas y extrae con alta precisión:
 
 - **Tipo de operación:** Distingue ingresos («recibí», «cobré», «me depositaron», «ingresé») de gastos («gasté», «compré», «pagué»).
 - **Monto y decimales:** Soporta números dígitos y números en texto («veinticinco soles» -> `25.00`, «12 soles con 50 céntimos» -> `12.50`, «49.90 soles» -> `49.90`).
 - **Desambiguación:** No confunde números de fecha (ej. «15 de marzo»), números de comprobante o cantidades de productos (ej. «compré 3 cuadernos por 45 soles») con el monto real.
-- **Categorización sugerida:** Asigna automáticamente Alimentación, Transporte, Compras, Sueldo, etc.
-- **Vista previa editable:** Permite al usuario revisar y ajustar los valores antes de confirmar el registro.
 
 ---
 
-## 4. Reconocimiento de Comprobantes por OCR Corregido
+## 4. Reconocimiento de Comprobantes por OCR
 
 El módulo de OCR (`app/services/ocr_service.py`) clasifica la imagen antes de intentar registrar un movimiento:
 
@@ -101,58 +101,51 @@ El módulo de OCR (`app/services/ocr_service.py`) clasifica la imagen antes de i
    - **Voucher de pago o billetera digital (Yape / Plin / BCP / BBVA):** Transferencia enviada clasificada como gasto.
    - **Comprobante de ingreso:** Transferencia recibida o abono clasificado como ingreso.
    - **Imagen no financiera:** Fotografías personales, paisajes o textos genéricos son rechazados y **no se registran como gasto**.
-4. **Extracción del importe total real:**
-   - Prioriza etiquetas de total (`TOTAL`, `TOTAL A PAGAR`, `IMPORTE TOTAL`, `MONTO PAGADO`, `MONTO TRANSFERIDO`).
-   - Penaliza y excluye subtotales, IGV (18%), vueltos, números de celular o números de operación.
-   - Formatos numéricos interpretados con precisión: `S/ 25.00`, `S/ 1,250.50`, `S/ 1.250,50`, `PEN 89.90`, etc.
-5. **Validación previa:** Pantalla de revisión con tipo de documento, importe, entidad detectada, selector de importes alternativos y visualización del texto OCR reconocido.
 
 ---
 
-## 5. Instalación de Dependencias
+## 5. Instalación y Ejecución Local
 
 ### Backend (Python):
 ```bash
 cd backend
 python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+API Swagger interactiva disponible en: `http://localhost:8000/docs`
 
 ### Frontend (Node.js):
 ```bash
 cd frontend
 npm install
+npm run dev
 ```
 
 ---
 
-## 6. Comandos para Iniciar los Servidores
+## 6. Despliegue en Producción (Render + Vercel)
 
-### Iniciar Backend (FastAPI en puerto 8000):
-```bash
-cd backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-API Swagger interactiva disponible en: `http://localhost:8000/docs`
+### Backend en Render:
+1. Crea un nuevo **Web Service** en [Render](https://render.com) conectado a este repositorio.
+2. Configura:
+   - **Root Directory:** `backend`
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+3. En **Environment Variables**, agrega:
+   - `GEMINI_API_KEY`: Tu API Key de Google Gemini.
+   - `DEMO_MODE`: `true`
 
-### Iniciar Frontend (Vite en puerto 8443 o 5173):
-```bash
-cd frontend
-npm run dev
-```
-O desde la raíz:
-```bash
-npm run dev
-```
+### Frontend en Vercel:
+1. Importa el repositorio en [Vercel](https://vercel.com).
+2. En **Environment Variables**, agrega:
+   - `VITE_API_BASE_URL`: La URL de tu servicio en Render (ejemplo: `https://pulpiai-backend.onrender.com/api`).
+3. Haz clic en **Deploy**.
 
 ---
 
 ## 7. Ejecución de Pruebas Automatizadas
 
-Para ejecutar las 20 pruebas automáticas que validan autenticación, voz, OCR y transacciones:
-
 ```bash
 cd backend
 python -m pytest tests -v
 ```
-
-Todas las pruebas pasan con éxito verificando los 12 casos obligatorios requeridos por la especificación.

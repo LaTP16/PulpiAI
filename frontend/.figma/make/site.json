@@ -1,5 +1,7 @@
 {
-  "description": "An AI-powered financial assistant for informal small businesses in Peru, helping entrepreneurs track income and expenses, visualize finances, and prepare for credit applications.",
+  "title": "PulpiAI - Tu negocio, más claro",
+  "language": "es",
+  "description": "Asistente de IA por voz e imagen que digitaliza ingresos y gastos de pequeños negocios informales para ordenar sus finanzas y facilitar su acceso al crédito.",
   "robots": {
     "index": false
   },

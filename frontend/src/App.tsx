@@ -80,16 +80,18 @@ function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <div className="logo">
       <div className="logo-mark"><span>P</span></div>
-      {!compact && <div><strong>Kipu<span>AI</span></strong><small>Tu negocio, más claro</small></div>}
+      {!compact && <div><strong>Pulpi<span>AI</span></strong><small>Tu negocio, más claro</small></div>}
     </div>
   )
 }
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('kipuai-auth') === 'true')
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    () => localStorage.getItem('pulpiai-auth') === 'true' || localStorage.getItem('kipuai-auth') === 'true'
+  )
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem('kipuai-user')
+      const saved = localStorage.getItem('pulpiai-user') || localStorage.getItem('kipuai-user')
       return saved ? JSON.parse(saved) : null
     } catch {
       return null
@@ -116,7 +118,7 @@ function App() {
       setSummary(sum)
     } catch (err: any) {
       console.error('Error fetching data:', err)
-      setApiError('No se pudo sincronizar con el servidor backend. Comprueba que el backend esté activo en el puerto 8000.')
+      setApiError('No se pudo sincronizar con el servidor backend. Comprueba que el backend esté activo.')
     } finally {
       setLoading(false)
     }
@@ -185,13 +187,15 @@ function App() {
   }
 
   const handleLoginSuccess = (loggedInUser: User) => {
-    localStorage.setItem('kipuai-auth', 'true')
-    localStorage.setItem('kipuai-user', JSON.stringify(loggedInUser))
+    localStorage.setItem('pulpiai-auth', 'true')
+    localStorage.setItem('pulpiai-user', JSON.stringify(loggedInUser))
     setUser(loggedInUser)
     setIsAuthenticated(true)
   }
 
   const handleLogout = () => {
+    localStorage.removeItem('pulpiai-auth')
+    localStorage.removeItem('pulpiai-user')
     localStorage.removeItem('kipuai-auth')
     localStorage.removeItem('kipuai-user')
     setUser(null)
@@ -324,7 +328,7 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
         <Logo />
         <div className="login-copy">
           <span className="eyebrow">Entorno de Pruebas & Demostración</span>
-          <h1>Acceso de prueba KipuAI</h1>
+          <h1>Acceso de prueba PulpiAI</h1>
           <p>Las credenciales de prueba ya están precargadas. Solo haz clic en «Ingresar» para acceder al sistema.</p>
         </div>
         <form onSubmit={submit}>
@@ -365,7 +369,7 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
         <div>
           <span className="eyebrow">Bodega Mi Esquina</span>
           <h2>Tus números claros.<br />Tus decisiones seguras.</h2>
-          <p>KipuAI reúne todos tus movimientos en un solo lugar con inteligencia artificial para voz y reconocimiento OCR de comprobantes.</p>
+          <p>PulpiAI reúne todos tus movimientos en un solo lugar con inteligencia artificial para voz y reconocimiento OCR de comprobantes.</p>
           <div className="login-feature">
             <Icon name="check" />
             <span><strong>Datos de ejemplo listos</strong><small>Explora el saldo, ingresos, gastos y reportes sin registrar todo a mano.</small></span>
@@ -678,7 +682,7 @@ function Register({
     if (!file) return
 
     setIsReadingPhoto(true)
-    setCaptureNotice('Enviando imagen al servidor OCR de KipuAI para preprocesamiento y clasificación…')
+    setCaptureNotice('Enviando imagen al servidor OCR de PulpiAI para preprocesamiento y clasificación…')
     setWarningNotice('')
     setOcrDetails(null)
 
@@ -887,11 +891,11 @@ function WhatsAppSimulator({ onConfirm, navigate }: { onConfirm: (items: Omit<Mo
 
   return (
     <div className="page">
-      <PageHeader title="Simulador de WhatsApp" description="Prueba cómo KipuAI interpreta mensajes de texto con ventas y gastos." />
+      <PageHeader title="Simulador de WhatsApp" description="Prueba cómo PulpiAI interpreta mensajes de texto con ventas y gastos." />
       <div className="simulation-banner"><Icon name="chat" size={18} /><div><strong>Simulación integrada</strong><span>Los mensajes se procesan e impactan directamente en tu saldo e historial tras confirmar.</span></div></div>
       <div className="phone-wrap">
         <div className="phone">
-          <div className="phone-header"><div className="bot-avatar">K</div><div><strong>KipuAI</strong><span>Asistente de tu negocio</span></div><Icon name="more" /></div>
+          <div className="phone-header"><div className="bot-avatar">P</div><div><strong>PulpiAI</strong><span>Asistente de tu negocio</span></div><Icon name="more" /></div>
           <div className="chat-area">
             <div className="chat-date">HOY</div>
             <div className="message incoming">Hola, María. Cuéntame qué vendiste o gastaste hoy y yo lo ordeno por ti.<time>9:30</time></div>
@@ -926,7 +930,7 @@ function WhatsAppSimulator({ onConfirm, navigate }: { onConfirm: (items: Omit<Mo
         <div className="sim-help">
           <span className="eyebrow">Pruébalo</span>
           <h2>Escribe como hablas</h2>
-          <p>KipuAI analiza tus mensajes y los convierte en registros financieros precisos.</p>
+          <p>PulpiAI analiza tus mensajes y los convierte en registros financieros precisos.</p>
           <div className="example"><span>Ejemplo</span><p>“Hoy vendí 350 soles y gasté 120 soles en mercadería”</p></div>
           <ul><li><Icon name="check" size={16} />Identifica ingresos y gastos simultáneamente</li><li><Icon name="check" size={16} />Te muestra una vista previa</li><li><Icon name="check" size={16} />Solo guarda cuando confirmas</li></ul>
         </div>
@@ -973,34 +977,47 @@ function History({ movements, onEdit, onDelete, onFilter }: { movements: Movemen
 
 function Assistant({ totals, movements }: { totals: { income: number; expense: number; balance: number }; movements: Movement[] }) {
   const [messages, setMessages] = useState<{ from: 'bot' | 'user'; text: string }[]>([
-    { from: 'bot', text: 'Hola, María. Soy tu asistente financiero. Puedo responder preguntas sobre tus movimientos y la salud de tu negocio.' },
+    { from: 'bot', text: 'Hola, María. Soy PulpiAI, tu asistente financiero con IA. Puedo responder preguntas sobre tus movimientos, analizar tus gastos y orientarte para acceder a crédito.' },
   ])
   const [input, setInput] = useState('')
+  const [isAsking, setIsAsking] = useState(false)
 
-  const ask = (question: string) => {
-    const lower = question.toLowerCase()
-    let answer = `Tu saldo disponible es ${formatMoney(totals.balance)}. Tienes ${movements.length} movimientos guardados.`
-    if (lower.includes('gast')) answer = `Tus gastos registrados suman ${formatMoney(totals.expense)}. La categoría más frecuente de gasto es Mercadería.`
-    if (lower.includes('ingres') || lower.includes('vend')) answer = `Tus ingresos registrados suman ${formatMoney(totals.income)}. Tu saldo neto es ${formatMoney(totals.balance)}.`
-    if (lower.includes('crédito') || lower.includes('credito')) answer = `Tu saldo disponible de ${formatMoney(totals.balance)} y la constancia de tus registros respaldan un buen perfil para solicitar crédito.`
-    setMessages(current => [...current, { from: 'user', text: question }, { from: 'bot', text: answer }])
+  const ask = async (question: string) => {
+    if (isAsking) return
+    setMessages(current => [...current, { from: 'user', text: question }])
     setInput('')
+    setIsAsking(true)
+
+    try {
+      const response = await api.askAssistant(question)
+      setMessages(current => [...current, { from: 'bot', text: response.answer }])
+    } catch {
+      const lower = question.toLowerCase()
+      let answer = `Tu saldo disponible es ${formatMoney(totals.balance)}. Tienes ${movements.length} movimientos guardados.`
+      if (lower.includes('gast')) answer = `Tus gastos registrados suman ${formatMoney(totals.expense)}. La categoría más frecuente de gasto es Mercadería.`
+      if (lower.includes('ingres') || lower.includes('vend')) answer = `Tus ingresos registrados suman ${formatMoney(totals.income)}. Tu saldo neto es ${formatMoney(totals.balance)}.`
+      if (lower.includes('crédito') || lower.includes('credito')) answer = `Tu saldo disponible de ${formatMoney(totals.balance)} y la constancia de tus registros respaldan un buen perfil para solicitar crédito.`
+      setMessages(current => [...current, { from: 'bot', text: answer }])
+    } finally {
+      setIsAsking(false)
+    }
   }
   const submit = (e: FormEvent) => { e.preventDefault(); if (input.trim()) ask(input.trim()) }
 
   return (
     <div className="page assistant-page">
-      <PageHeader title="Asistente financiero" description="Haz preguntas sobre los números de tu negocio." />
+      <PageHeader title="Asistente financiero" description="Haz preguntas sobre los números de tu negocio con Inteligencia Artificial." />
       <div className="assistant-layout">
         <div className="card assistant-chat">
-          <div className="assistant-head"><div className="bot-avatar"><Icon name="sparkle" size={19} /></div><div><strong>KipuAI</strong><span><i /> Conectado con tus movimientos</span></div></div>
+          <div className="assistant-head"><div className="bot-avatar"><Icon name="sparkle" size={19} /></div><div><strong>PulpiAI</strong><span><i /> Conectado con IA y tus movimientos</span></div></div>
           <div className="assistant-messages">
-            {messages.map((message, index) => <div key={index} className={`assistant-message ${message.from}`}>{message.from === 'bot' && <div className="mini-bot">K</div>}<p>{message.text}</p></div>)}
+            {messages.map((message, index) => <div key={index} className={`assistant-message ${message.from}`}>{message.from === 'bot' && <div className="mini-bot">P</div>}<p>{message.text}</p></div>)}
+            {isAsking && <div className="assistant-message bot"><div className="mini-bot">P</div><p>Analizando tus finanzas con IA…</p></div>}
           </div>
           <div className="suggestions">
-            {['¿Cuánto gasté?', '¿Cómo van mis ingresos?', '¿Estoy listo para un crédito?'].map(q => <button key={q} onClick={() => ask(q)}>{q}</button>)}
+            {['¿Cuánto gasté?', '¿Cómo van mis ingresos?', '¿Estoy listo para un crédito?'].map(q => <button key={q} disabled={isAsking} onClick={() => ask(q)}>{q}</button>)}
           </div>
-          <form className="assistant-input" onSubmit={submit}><input value={input} onChange={e => setInput(e.target.value)} placeholder="Escribe tu pregunta..." /><button className="send-button" aria-label="Enviar"><Icon name="send" size={18} /></button></form>
+          <form className="assistant-input" onSubmit={submit}><input value={input} onChange={e => setInput(e.target.value)} placeholder="Escribe tu pregunta..." disabled={isAsking} /><button className="send-button" disabled={isAsking} aria-label="Enviar"><Icon name="send" size={18} /></button></form>
         </div>
         <aside className="card context-card">
           <span className="eyebrow">Tu resumen actual</span><h2>Datos reales</h2>

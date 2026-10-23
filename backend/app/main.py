@@ -8,6 +8,7 @@ from app.api.auth_router import router as auth_router
 from app.api.transactions_router import router as transactions_router
 from app.api.voice_router import router as voice_router
 from app.api.ocr_router import router as ocr_router
+from app.api.assistant_router import router as assistant_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,8 +19,8 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="KipuAI Financial API",
-    description="Backend API for personal finance and microbusiness tracking with Voice and OCR processing",
+    title="PulpiAI Financial API",
+    description="Asistente de IA por voz e imagen que digitaliza ingresos y gastos de pequeños negocios informales para ordenar sus finanzas y facilitar su acceso al crédito.",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -38,12 +39,22 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(transactions_router, prefix="/api")
 app.include_router(voice_router, prefix="/api")
 app.include_router(ocr_router, prefix="/api")
+app.include_router(assistant_router, prefix="/api")
+
+@app.get("/")
+def root():
+    return {
+        "service": "PulpiAI Backend",
+        "status": "healthy",
+        "docs": "/docs",
+        "health": "/api/health"
+    }
 
 @app.get("/api/health")
 def health_check():
     return {
         "status": "healthy",
-        "service": "KipuAI Backend",
+        "service": "PulpiAI Backend",
         "demo_mode": settings.DEMO_MODE,
         "environment": settings.ENVIRONMENT
     }

@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+const rawApiBase = (import.meta.env.VITE_API_BASE_URL || '/api').trim().replace(/\/+$/, '')
+const API_BASE = rawApiBase.endsWith('/api') ? rawApiBase : `${rawApiBase}/api`
 
 export type MovementType = 'income' | 'expense'
 
@@ -80,6 +81,12 @@ export type OCRParseResult = {
   confidence: number
   needs_confirmation: boolean
   status_message: string
+}
+
+export type AssistantChatResponse = {
+  answer: string
+  provider: string
+  model: string
 }
 
 export const api = {
@@ -174,6 +181,17 @@ export const api = {
       const err = await res.json().catch(() => ({ detail: 'Error al procesar la imagen' }))
       throw new Error(err.detail || 'Error al procesar comprobante')
     }
+    return res.json()
+  },
+
+  // AI Assistant
+  async askAssistant(question: string): Promise<AssistantChatResponse> {
+    const res = await fetch(`${API_BASE}/assistant/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    })
+    if (!res.ok) throw new Error('Error al consultar al asistente IA')
     return res.json()
   },
 }
