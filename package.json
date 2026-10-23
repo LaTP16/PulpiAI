@@ -4,9 +4,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "backend": "python -m uvicorn app.main:app --app-dir backend --reload --port 8000",
+    "test:backend": "python -m pytest backend/tests",
     "format": "oxfmt"
   },
   "dependencies": {

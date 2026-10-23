@@ -382,8 +382,98 @@ h1, h2, h3, .logo strong, .stat-card > strong { font-family: 'Manrope', sans-ser
   .filters > * { grid-column: 1 !important; }
   .credit-score { align-items: flex-start; gap: 16px; }
   .score-large { width: 96px; height: 96px; }
-  .score-large strong { font-size: 28px; }
-  .credit-score h2 { font-size: 18px; }
   .check-item { grid-template-columns: auto 1fr; }
   .check-item > b { grid-column: 2; width: max-content; }
+}
+
+.demo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #eef5f0;
+  color: #176b43;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px solid #d0e7d8;
+}
+
+.warning-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: #8c3b1e;
+  background: #fdf2ed;
+  border: 1px solid #fad3c4;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  margin-bottom: 18px;
+}
+
+.ocr-details-card {
+  background: #f8faf8;
+  border: 1px solid #e1e8e2;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 18px;
+  font-size: 11px;
+}
+
+.ocr-details-card h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #17211b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ocr-tag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #e2f3e9;
+  color: #176b43;
+  text-transform: uppercase;
+}
+
+.ocr-tag.income { background: #e2f3e9; color: #176b43; }
+.ocr-tag.expense { background: #fbeaea; color: #d85b5b; }
+.ocr-tag.none { background: #eee; color: #666; }
+
+.ocr-amounts-select {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ocr-raw-toggle {
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--green-700);
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ocr-raw-box {
+  margin-top: 6px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #e5ebe6;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 9px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: #444;
 }

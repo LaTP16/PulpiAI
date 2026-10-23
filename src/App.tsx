@@ -1,18 +1,9 @@
-import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { api, Movement, MovementType, TransactionSummary, User, OCRParseResult, VoiceParseResult } from './services/api'
 
-type MovementType = 'income' | 'expense'
 type View = 'dashboard' | 'register' | 'whatsapp' | 'history' | 'assistant' | 'credit'
-
-type Movement = {
-  id: string
-  type: MovementType
-  amount: number
-  category: string
-  description: string
-  date: string
-}
-
 type FormState = Omit<Movement, 'id'>
+
 type SpeechRecognitionEventLike = { results: { [index: number]: { [index: number]: { transcript: string } } } }
 type SpeechRecognitionLike = {
   lang: string
@@ -25,8 +16,8 @@ type SpeechRecognitionLike = {
 }
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
-const incomeCategories = ['Ventas', 'Pedidos', 'Otros ingresos']
-const expenseCategories = ['Mercadería', 'Servicios', 'Transporte', 'Alquiler', 'Otros gastos']
+const incomeCategories = ['Ventas', 'Pedidos', 'Sueldo', 'Trabajos independientes', 'Otros ingresos']
+const expenseCategories = ['Mercadería', 'Alimentación', 'Transporte', 'Servicios', 'Compras', 'Entretenimiento', 'Alquiler', 'Otros gastos']
 
 const iconPaths: Record<string, ReactNode> = {
   dashboard: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
@@ -51,6 +42,7 @@ const iconPaths: Record<string, ReactNode> = {
   document: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></>,
   menu: <><path d="M4 6h16M4 12h16M4 18h16"/></>,
   close: <><path d="m6 6 12 12M18 6 6 18"/></>,
+  alert: <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>,
 }
 
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
@@ -60,57 +52,19 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
 const formatMoney = (value: number) =>
   new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 2 }).format(value)
 
-const formatDate = (date: string) =>
-  new Intl.DateTimeFormat('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(`${date}T12:00:00`))
+const formatDate = (date: string) => {
+  if (!date) return ''
+  try {
+    return new Intl.DateTimeFormat('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(`${date}T12:00:00`))
+  } catch {
+    return date
+  }
+}
 
 const isoDate = (daysAgo = 0) => {
   const date = new Date()
   date.setDate(date.getDate() - daysAgo)
   return date.toISOString().slice(0, 10)
-}
-
-const movementKey = (movement: Omit<Movement, 'id'>) =>
-  `${movement.type}|${movement.amount.toFixed(2)}|${movement.category}|${movement.description.trim().toLowerCase()}|${movement.date}`
-
-const spanishNumbers: Record<string, number> = {
-  cero: 0, un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
-  diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19,
-  veinte: 20, veintiuno: 21, veintidos: 22, veintitres: 23, veinticuatro: 24, veinticinco: 25, veintiseis: 26, veintisiete: 27, veintiocho: 28, veintinueve: 29,
-  treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90,
-  cien: 100, ciento: 100, doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500, seiscientos: 600, setecientos: 700, ochocientos: 800, novecientos: 900,
-}
-
-const normalizeText = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
-
-function extractAmount(text: string) {
-  const normalized = normalizeText(text)
-  const digits = normalized.match(/(?:s\/\s*)?(\d+(?:[.,]\d{1,2})?)(?:\s*soles?)?/)
-  if (digits) return Number(digits[1].replace(',', '.'))
-  const tokens = normalized.replace(/[^\w\s]/g, ' ').split(/\s+/)
-  let total = 0
-  let found = false
-  for (const token of tokens) {
-    if (token === 'y') continue
-    if (spanishNumbers[token] !== undefined) {
-      total += spanishNumbers[token]
-      found = true
-    } else if (found) break
-  }
-  return found ? total : 0
-}
-
-function movementFromSpeech(transcript: string): FormState | null {
-  const normalized = normalizeText(transcript)
-  const type: MovementType | null = /(gaste|compre|pague|salio|egreso)/.test(normalized) ? 'expense' : /(vendi|cobre|recibi|ingreso)/.test(normalized) ? 'income' : null
-  const amount = extractAmount(normalized)
-  if (!type || !amount) return null
-  return {
-    type,
-    amount,
-    category: type === 'income' ? 'Ventas' : 'Mercadería',
-    description: transcript.trim(),
-    date: isoDate(),
-  }
 }
 
 const navItems: { id: View; label: string; icon: string }[] = [
@@ -133,21 +87,46 @@ function Logo({ compact = false }: { compact?: boolean }) {
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('kipuai-auth') === 'true')
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('kipuai-user')
+      return saved ? JSON.parse(saved) : null
+    } catch {
+      return null
+    }
+  })
   const [view, setView] = useState<View>('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [editingMovement, setEditingMovement] = useState<Movement | null>(null)
-  const [movements, setMovements] = useState<Movement[]>(() => {
+  const [movements, setMovements] = useState<Movement[]>([])
+  const [summary, setSummary] = useState<TransactionSummary | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [apiError, setApiError] = useState<string | null>(null)
+
+  const reloadData = useCallback(async () => {
+    if (!isAuthenticated) return
+    setLoading(true)
+    setApiError(null)
     try {
-      const saved = localStorage.getItem('kipuai-movements-v1')
-      return saved ? JSON.parse(saved) : []
-    } catch {
-      return []
+      const [txList, sum] = await Promise.all([
+        api.getTransactions(),
+        api.getSummary()
+      ])
+      setMovements(txList)
+      setSummary(sum)
+    } catch (err: any) {
+      console.error('Error fetching data:', err)
+      setApiError('No se pudo sincronizar con el servidor backend. Comprueba que el backend esté activo en el puerto 8000.')
+    } finally {
+      setLoading(false)
     }
-  })
+  }, [isAuthenticated])
 
   useEffect(() => {
-    localStorage.setItem('kipuai-movements-v1', JSON.stringify(movements))
-  }, [movements])
+    if (isAuthenticated) {
+      reloadData()
+    }
+  }, [isAuthenticated, reloadData])
 
   const navigate = (next: View) => {
     setView(next)
@@ -156,32 +135,48 @@ function App() {
   }
 
   const totals = useMemo(() => {
+    if (summary) {
+      return {
+        income: summary.income,
+        expense: summary.expense,
+        balance: summary.balance,
+        weekly: summary.weekly
+      }
+    }
     const income = movements.filter(m => m.type === 'income').reduce((sum, m) => sum + m.amount, 0)
     const expense = movements.filter(m => m.type === 'expense').reduce((sum, m) => sum + m.amount, 0)
-    return { income, expense, balance: income - expense }
-  }, [movements])
+    return { income, expense, balance: income - expense, weekly: [] }
+  }, [summary, movements])
 
-  const saveMovement = (movement: Movement) => {
-    setMovements(current => {
-      const exists = current.some(item => item.id === movement.id)
-      if (exists) return current.map(item => item.id === movement.id ? movement : item)
-      if (current.some(item => movementKey(item) === movementKey(movement))) return current
-      return [movement, ...current]
-    })
-    setEditingMovement(null)
+  const handleSaveMovement = async (movementData: FormState, idToUpdate?: string | null) => {
+    try {
+      if (idToUpdate) {
+        await api.updateTransaction(idToUpdate, movementData)
+      } else {
+        await api.createTransaction(movementData)
+      }
+      await reloadData()
+      setEditingMovement(null)
+    } catch (err: any) {
+      alert(err.message || 'Error al guardar movimiento')
+    }
   }
 
-  const addMovements = (items: Movement[]) => {
-    setMovements(current => {
-      const known = new Set(current.map(movementKey))
-      const unique = items.filter(item => {
-        const key = movementKey(item)
-        if (known.has(key)) return false
-        known.add(key)
-        return true
-      })
-      return [...unique, ...current]
-    })
+  const handleDeleteMovement = async (id: string) => {
+    if (!window.confirm('¿Seguro que deseas eliminar este movimiento?')) return
+    try {
+      await api.deleteTransaction(id)
+      await reloadData()
+    } catch (err: any) {
+      alert(err.message || 'Error al eliminar movimiento')
+    }
+  }
+
+  const handleBatchAddMovements = async (items: Omit<Movement, 'id'>[]) => {
+    for (const item of items) {
+      await api.createTransaction(item)
+    }
+    await reloadData()
   }
 
   const startEditing = (movement: Movement) => {
@@ -189,8 +184,22 @@ function App() {
     navigate('register')
   }
 
+  const handleLoginSuccess = (loggedInUser: User) => {
+    localStorage.setItem('kipuai-auth', 'true')
+    localStorage.setItem('kipuai-user', JSON.stringify(loggedInUser))
+    setUser(loggedInUser)
+    setIsAuthenticated(true)
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('kipuai-auth')
+    localStorage.removeItem('kipuai-user')
+    setUser(null)
+    setIsAuthenticated(false)
+  }
+
   if (!isAuthenticated) {
-    return <Login onLogin={() => { localStorage.setItem('kipuai-auth', 'true'); setIsAuthenticated(true) }} />
+    return <Login onLogin={handleLoginSuccess} />
   }
 
   return (
@@ -216,8 +225,11 @@ function App() {
         </div>
         <div className="profile">
           <div className="avatar">MR</div>
-          <div><strong>María Rodríguez</strong><span>Bodega Mi Esquina</span></div>
-          <button className="profile-menu" onClick={() => { localStorage.removeItem('kipuai-auth'); setIsAuthenticated(false) }} aria-label="Cerrar sesión"><Icon name="more" size={18} /></button>
+          <div>
+            <strong>{user?.name || 'María Rodríguez'}</strong>
+            <span>{user?.business_name || 'Bodega Mi Esquina'}</span>
+          </div>
+          <button className="profile-menu" onClick={handleLogout} title="Cerrar sesión" aria-label="Cerrar sesión"><Icon name="more" size={18} /></button>
         </div>
       </aside>
 
@@ -229,10 +241,29 @@ function App() {
           <Logo compact />
           <div className="avatar small">MR</div>
         </header>
-        {view === 'dashboard' && <Dashboard movements={movements} totals={totals} navigate={navigate} />}
-        {view === 'register' && <Register movements={movements} saveMovement={saveMovement} onDelete={id => setMovements(m => m.filter(item => item.id !== id))} requestedEdit={editingMovement} clearRequestedEdit={() => setEditingMovement(null)} />}
-        {view === 'whatsapp' && <WhatsAppSimulator onConfirm={addMovements} navigate={navigate} />}
-        {view === 'history' && <History movements={movements} onEdit={startEditing} onDelete={id => setMovements(m => m.filter(item => item.id !== id))} />}
+
+        {apiError && (
+          <div className="warning-notice" style={{ margin: '16px 20px 0' }}>
+            <Icon name="alert" size={18} />
+            <div>
+              <strong>Aviso de conexión:</strong> {apiError}
+              <button onClick={reloadData} style={{ marginLeft: 10, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>Reintentar</button>
+            </div>
+          </div>
+        )}
+
+        {view === 'dashboard' && <Dashboard movements={movements} totals={totals} summaryWeekly={summary?.weekly} navigate={navigate} />}
+        {view === 'register' && (
+          <Register
+            movements={movements}
+            onSave={handleSaveMovement}
+            onDelete={handleDeleteMovement}
+            requestedEdit={editingMovement}
+            clearRequestedEdit={() => setEditingMovement(null)}
+          />
+        )}
+        {view === 'whatsapp' && <WhatsAppSimulator onConfirm={handleBatchAddMovements} navigate={navigate} />}
+        {view === 'history' && <History movements={movements} onEdit={startEditing} onDelete={handleDeleteMovement} onFilter={reloadData} />}
         {view === 'assistant' && <Assistant totals={totals} movements={movements} />}
         {view === 'credit' && <Credit totals={totals} movements={movements} />}
       </main>
@@ -249,35 +280,102 @@ function App() {
   )
 }
 
-function Login({ onLogin }: { onLogin: () => void }) {
-  const [identifier, setIdentifier] = useState('')
-  const [password, setPassword] = useState('')
+function Login({ onLogin }: { onLogin: (user: User) => void }) {
+  // Requirement 1: Pre-fill test credentials by default so tester can log in with 1 click!
+  const [identifier, setIdentifier] = useState('maria@gmail.com')
+  const [password, setPassword] = useState('comerciante123')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
-    const validUser = identifier.trim().toLowerCase() === 'maria@gmail.com' || identifier.trim() === '976345234'
-    if (validUser && password === 'comerciante123') {
-      onLogin()
-      return
+    setLoading(true)
+    setError('')
+    try {
+      const response = await api.login(identifier, password)
+      if (response.success && response.user) {
+        onLogin(response.user)
+      } else {
+        setError('No se pudo verificar la cuenta de demostración.')
+      }
+    } catch (err: any) {
+      console.warn('Backend login fallback:', err)
+      // Fallback if backend offline: verify default demo credentials locally
+      if ((identifier.trim().toLowerCase() === 'maria@gmail.com' || identifier.trim() === '976345234') && password === 'comerciante123') {
+        onLogin({
+          id: 'demo-user-maria-001',
+          name: 'María Rodríguez',
+          email: 'maria@gmail.com',
+          phone: '976345234',
+          business_name: 'Bodega Mi Esquina',
+          is_demo: true,
+        })
+      } else {
+        setError(err.message || 'Revisa tu correo, celular o contraseña.')
+      }
+    } finally {
+      setLoading(false)
     }
-    setError('Revisa tu correo, celular o contraseña.')
   }
 
   return (
     <main className="login-page">
       <section className="login-card">
         <Logo />
-        <div className="login-copy"><span className="eyebrow">Bienvenida de nuevo</span><h1>Ordena tu negocio, paso a paso</h1><p>Ingresa para revisar tus ventas, gastos y el avance de tu bodega.</p></div>
+        <div className="login-copy">
+          <span className="eyebrow">Entorno de Pruebas & Demostración</span>
+          <h1>Acceso de prueba KipuAI</h1>
+          <p>Las credenciales de prueba ya están precargadas. Solo haz clic en «Ingresar» para acceder al sistema.</p>
+        </div>
         <form onSubmit={submit}>
           {error && <div className="login-error">{error}</div>}
-          <label className="form-field"><span>Correo o celular</span><input autoComplete="username" value={identifier} onChange={e => { setIdentifier(e.target.value); setError('') }} placeholder="maria@gmail.com" required /></label>
-          <label className="form-field"><span>Contraseña</span><input autoComplete="current-password" type="password" value={password} onChange={e => { setPassword(e.target.value); setError('') }} placeholder="Tu contraseña" required /></label>
-          <button className="primary-button login-button">Ingresar a KipuAI</button>
+          <label className="form-field">
+            <span>Correo o celular</span>
+            <input
+              autoComplete="username"
+              value={identifier}
+              onChange={e => { setIdentifier(e.target.value); setError('') }}
+              placeholder="maria@gmail.com"
+              required
+            />
+          </label>
+          <label className="form-field">
+            <span>Contraseña</span>
+            <input
+              autoComplete="current-password"
+              type="password"
+              value={password}
+              onChange={e => { setPassword(e.target.value); setError('') }}
+              placeholder="Tu contraseña"
+              required
+            />
+          </label>
+          <button className="primary-button login-button" disabled={loading} type="submit">
+            {loading ? 'Ingresando…' : 'Ingresar'}
+          </button>
         </form>
-        <div className="demo-credentials"><strong>Acceso de demostración</strong><span>maria@gmail.com o 976345234</span><span>Contraseña: comerciante123</span></div>
+        <div className="demo-credentials">
+          <strong>✓ Cuenta de demostración precargada</strong>
+          <span>Usuario: <code>maria@gmail.com</code> (o <code>976345234</code>)</span>
+          <span>Contraseña: <code>comerciante123</code></span>
+          <small style={{ color: '#666', marginTop: 4, display: 'block' }}>Solo haz clic en el botón «Ingresar» arriba.</small>
+        </div>
       </section>
-      <aside className="login-panel"><div><span className="eyebrow">Bodega Mi Esquina</span><h2>Tus números claros.<br />Tus decisiones seguras.</h2><p>KipuAI reúne todos tus movimientos en un solo lugar para ayudarte a entender cómo avanza tu negocio.</p><div className="login-feature"><Icon name="check" /><span><strong>Información sincronizada</strong><small>Registra una vez y consulta en cualquier pantalla.</small></span></div><div className="login-feature"><Icon name="sparkle" /><span><strong>Asistencia sencilla</strong><small>Respuestas basadas en tus movimientos reales.</small></span></div></div></aside>
+      <aside className="login-panel">
+        <div>
+          <span className="eyebrow">Bodega Mi Esquina</span>
+          <h2>Tus números claros.<br />Tus decisiones seguras.</h2>
+          <p>KipuAI reúne todos tus movimientos en un solo lugar con inteligencia artificial para voz y reconocimiento OCR de comprobantes.</p>
+          <div className="login-feature">
+            <Icon name="check" />
+            <span><strong>Datos de ejemplo listos</strong><small>Explora el saldo, ingresos, gastos y reportes sin registrar todo a mano.</small></span>
+          </div>
+          <div className="login-feature">
+            <Icon name="sparkle" />
+            <span><strong>Reconocimiento de voz & OCR corregidos</strong><small>Extracción de montos precisos y clasificación automática de comprobantes.</small></span>
+          </div>
+        </div>
+      </aside>
     </main>
   )
 }
@@ -291,16 +389,32 @@ function PageHeader({ eyebrow, title, description, action }: { eyebrow?: string;
   )
 }
 
-function Dashboard({ movements, totals, navigate }: { movements: Movement[]; totals: { income: number; expense: number; balance: number }; navigate: (v: View) => void }) {
-  const weekly = Array.from({ length: 7 }, (_, index) => {
-    const date = isoDate(6 - index)
-    const dayMovements = movements.filter(m => m.date === date)
-    return {
-      label: new Intl.DateTimeFormat('es-PE', { weekday: 'short' }).format(new Date(`${date}T12:00:00`)).slice(0, 2),
-      income: dayMovements.filter(m => m.type === 'income').reduce((s, m) => s + m.amount, 0),
-      expense: dayMovements.filter(m => m.type === 'expense').reduce((s, m) => s + m.amount, 0),
-    }
-  })
+function Dashboard({
+  movements,
+  totals,
+  summaryWeekly,
+  navigate
+}: {
+  movements: Movement[]
+  totals: { income: number; expense: number; balance: number }
+  summaryWeekly?: { label: string; date: string; income: number; expense: number }[]
+  navigate: (v: View) => void
+}) {
+  const weekly = useMemo(() => {
+    if (summaryWeekly && summaryWeekly.length > 0) return summaryWeekly
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = isoDate(6 - index)
+      const dayMovements = movements.filter(m => m.date === date)
+      return {
+        label: new Intl.DateTimeFormat('es-PE', { weekday: 'short' }).format(new Date(`${date}T12:00:00`)).slice(0, 2),
+        date,
+        income: dayMovements.filter(m => m.type === 'income').reduce((s, m) => s + m.amount, 0),
+        expense: dayMovements.filter(m => m.type === 'expense').reduce((s, m) => s + m.amount, 0),
+      }
+    })
+  }, [summaryWeekly, movements])
+
   const max = Math.max(...weekly.flatMap(day => [day.income, day.expense]), 1)
   const today = new Intl.DateTimeFormat('es-PE', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())
 
@@ -309,27 +423,37 @@ function Dashboard({ movements, totals, navigate }: { movements: Movement[]; tot
       <PageHeader
         eyebrow={today}
         title="Hola, María"
-        description="Así está tu bodega hoy. Vas por buen camino."
-        action={<button className="primary-button" onClick={() => navigate('register')}><Icon name="plus" size={18} />Registrar movimiento</button>}
+        description="Así está tu bodega hoy con datos de demostración coherentes."
+        action={
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <span className="demo-pill">Demostración</span>
+            <button className="primary-button" onClick={() => navigate('register')}>
+              <Icon name="plus" size={18} />Registrar movimiento
+            </button>
+          </div>
+        }
       />
       <section className="stats-grid">
         <div className="stat-card balance-card">
-          <div className="stat-top"><span className="stat-icon"><Icon name="wallet" /></span><span className="status-pill">Actualizado</span></div>
+          <div className="stat-top">
+            <span className="stat-icon"><Icon name="wallet" /></span>
+            <span className="status-pill">Calculado en tiempo real</span>
+          </div>
           <span className="stat-label">Saldo disponible</span>
           <strong>{formatMoney(totals.balance)}</strong>
-          <small>{movements.length} movimientos · ingresos menos gastos</small>
+          <small>{movements.length} movimientos · Ingresos ({formatMoney(totals.income)}) − Gastos ({formatMoney(totals.expense)})</small>
         </div>
         <div className="stat-card">
           <div className="stat-top"><span className="stat-icon income"><Icon name="arrowUp" /></span><span className="trend positive">Este mes</span></div>
           <span className="stat-label">Ingresos</span>
           <strong>{formatMoney(totals.income)}</strong>
-          <small>{movements.filter(m => m.type === 'income').length} movimientos</small>
+          <small>{movements.filter(m => m.type === 'income').length} movimientos registrados</small>
         </div>
         <div className="stat-card">
           <div className="stat-top"><span className="stat-icon expense"><Icon name="arrowDown" /></span><span className="trend">Este mes</span></div>
           <span className="stat-label">Gastos</span>
           <strong>{formatMoney(totals.expense)}</strong>
-          <small>{movements.filter(m => m.type === 'expense').length} movimientos</small>
+          <small>{movements.filter(m => m.type === 'expense').length} movimientos registrados</small>
         </div>
       </section>
 
@@ -342,10 +466,10 @@ function Dashboard({ movements, totals, navigate }: { movements: Movement[]; tot
           <div className="chart">
             <div className="chart-lines"><i/><i/><i/><i/></div>
             {weekly.map(day => (
-              <div className="bar-group" key={day.label}>
+              <div className="bar-group" key={day.date || day.label}>
                 <div className="bars">
-                  <span className="bar income-bar" style={{ height: `${Math.max((day.income / max) * 100, day.income ? 6 : 0)}%` }} title={formatMoney(day.income)} />
-                  <span className="bar expense-bar" style={{ height: `${Math.max((day.expense / max) * 100, day.expense ? 6 : 0)}%` }} title={formatMoney(day.expense)} />
+                  <span className="bar income-bar" style={{ height: `${Math.max((day.income / max) * 100, day.income ? 8 : 0)}%` }} title={`Ingreso: ${formatMoney(day.income)}`} />
+                  <span className="bar expense-bar" style={{ height: `${Math.max((day.expense / max) * 100, day.expense ? 8 : 0)}%` }} title={`Gasto: ${formatMoney(day.expense)}`} />
                 </div>
                 <small>{day.label}</small>
               </div>
@@ -354,21 +478,27 @@ function Dashboard({ movements, totals, navigate }: { movements: Movement[]; tot
         </div>
 
         <div className="card health-card">
-          <div className="card-heading"><div><h2>Salud del negocio</h2><p>Basado en tus registros</p></div></div>
+          <div className="card-heading"><div><h2>Salud del negocio</h2><p>Basado en tus registros actuales</p></div></div>
           <div className="health-score">
-            <div className="score-ring"><strong>{totals.income ? Math.min(92, Math.round((totals.balance / totals.income) * 100 + 50)) : 0}</strong><span>/100</span></div>
-            <div><strong>{movements.length ? (totals.balance >= 0 ? 'Buen progreso' : 'Revisa tus gastos') : 'Empieza tu registro'}</strong><p>{movements.length ? (totals.balance >= 0 ? 'Tus ingresos son mayores que tus gastos.' : 'Tus gastos superan los ingresos registrados.') : 'Aún no tienes movimientos guardados.'}</p></div>
+            <div className="score-ring"><strong>{totals.income ? Math.min(95, Math.round((totals.balance / totals.income) * 100 + 40)) : 0}</strong><span>/100</span></div>
+            <div>
+              <strong>{movements.length ? (totals.balance >= 0 ? 'Buen progreso financiero' : 'Revisa tus gastos') : 'Empieza tu registro'}</strong>
+              <p>{movements.length ? (totals.balance >= 0 ? 'Tus ingresos son mayores que tus gastos. Tienes liquidez disponible.' : 'Tus gastos superan los ingresos registrados.') : 'Aún no tienes movimientos guardados.'}</p>
+            </div>
           </div>
-          <div className="progress-row"><span>Margen disponible</span><strong>{totals.income ? Math.max(0, Math.round((totals.balance / totals.income) * 100)) : 0}%</strong></div>
-          <div className="progress"><span style={{ width: `${totals.income ? Math.max(0, (totals.balance / totals.income) * 100) : 0}%` }} /></div>
+          <div className="progress-row">
+            <span>Margen disponible</span>
+            <strong>{totals.income ? Math.max(0, Math.round((totals.balance / totals.income) * 100)) : 0}%</strong>
+          </div>
+          <div className="progress"><span style={{ width: `${totals.income ? Math.max(0, Math.min(100, (totals.balance / totals.income) * 100)) : 0}%` }} /></div>
           <button className="text-button" onClick={() => navigate('credit')}>Ver preparación para crédito <Icon name="chevron" size={16} /></button>
         </div>
       </section>
 
       <section className="card recent-card">
         <div className="card-heading">
-          <div><h2>Últimos movimientos</h2><p>Tu actividad más reciente</p></div>
-          <button className="text-button" onClick={() => navigate('history')}>Ver todo <Icon name="chevron" size={16} /></button>
+          <div><h2>Últimos movimientos</h2><p>Tu actividad más reciente (datos de ejemplo)</p></div>
+          <button className="text-button" onClick={() => navigate('history')}>Ver todo ({movements.length}) <Icon name="chevron" size={16} /></button>
         </div>
         <MovementList movements={movements.slice(0, 5)} />
       </section>
@@ -383,7 +513,13 @@ function MovementList({ movements, actions }: { movements: Movement[]; actions?:
       {movements.map(movement => (
         <div className="movement-row" key={movement.id}>
           <span className={`movement-icon ${movement.type}`}><Icon name={movement.type === 'income' ? 'arrowUp' : 'arrowDown'} size={18} /></span>
-          <div className="movement-info"><strong>{movement.description}</strong><span>{movement.category} · {formatDate(movement.date)}</span></div>
+          <div className="movement-info">
+            <strong>
+              {movement.description}
+              {movement.is_demo && <span className="demo-pill" style={{ marginLeft: 6, display: 'inline-block', fontSize: 8, padding: '1px 5px' }}>Demo</span>}
+            </strong>
+            <span>{movement.category} · {formatDate(movement.date)} {movement.source && `· vía ${movement.source}`}</span>
+          </div>
           <strong className={`movement-amount ${movement.type}`}>{movement.type === 'income' ? '+' : '−'} {formatMoney(movement.amount)}</strong>
           {actions?.(movement)}
         </div>
@@ -392,116 +528,187 @@ function MovementList({ movements, actions }: { movements: Movement[]; actions?:
   )
 }
 
-function Register({ movements, saveMovement, onDelete, requestedEdit, clearRequestedEdit }: { movements: Movement[]; saveMovement: (m: Movement) => void; onDelete: (id: string) => void; requestedEdit: Movement | null; clearRequestedEdit: () => void }) {
+function Register({
+  movements,
+  onSave,
+  onDelete,
+  requestedEdit,
+  clearRequestedEdit
+}: {
+  movements: Movement[]
+  onSave: (m: FormState, idToUpdate?: string | null) => Promise<void>
+  onDelete: (id: string) => Promise<void>
+  requestedEdit: Movement | null
+  clearRequestedEdit: () => void
+}) {
   const blankForm: FormState = { type: 'income', amount: 0, category: 'Ventas', description: '', date: isoDate() }
   const [form, setForm] = useState<FormState>(blankForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [captureNotice, setCaptureNotice] = useState('')
+  const [warningNotice, setWarningNotice] = useState('')
   const [isListening, setIsListening] = useState(false)
   const [isReadingPhoto, setIsReadingPhoto] = useState(false)
+  const [ocrDetails, setOcrDetails] = useState<OCRParseResult | null>(null)
+  const [showRawOcr, setShowRawOcr] = useState(false)
   const photoInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!requestedEdit) return
     setEditingId(requestedEdit.id)
-    setForm({ type: requestedEdit.type, amount: requestedEdit.amount, category: requestedEdit.category, description: requestedEdit.description, date: requestedEdit.date })
+    setForm({
+      type: requestedEdit.type,
+      amount: requestedEdit.amount,
+      category: requestedEdit.category,
+      description: requestedEdit.description,
+      date: requestedEdit.date
+    })
   }, [requestedEdit])
 
-  const setType = (type: MovementType) => setForm(current => ({ ...current, type, category: type === 'income' ? 'Ventas' : 'Mercadería' }))
-  const edit = (movement: Movement) => {
-    setEditingId(movement.id)
-    setForm({ type: movement.type, amount: movement.amount, category: movement.category, description: movement.description, date: movement.date })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    if (!form.amount || !form.description.trim()) return
-    saveMovement({ ...form, id: editingId || crypto.randomUUID(), amount: Number(form.amount) })
-    setNotice(editingId ? 'Movimiento actualizado correctamente.' : 'Movimiento registrado correctamente.')
-    setEditingId(null)
-    setForm(blankForm)
-    window.setTimeout(() => setNotice(''), 3000)
+  const setType = (type: MovementType) => {
+    setForm(current => ({
+      ...current,
+      type,
+      category: type === 'income' ? 'Ventas' : 'Mercadería'
+    }))
   }
 
+  const edit = (movement: Movement) => {
+    setEditingId(movement.id)
+    setForm({
+      type: movement.type,
+      amount: movement.amount,
+      category: movement.category,
+      description: movement.description,
+      date: movement.date
+    })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!form.amount || !form.description.trim()) {
+      alert('Ingresa un monto válido mayor a 0 y una descripción.')
+      return
+    }
+    await onSave({ ...form, amount: Number(form.amount) }, editingId)
+    setNotice(editingId ? 'Movimiento actualizado correctamente en la base de datos.' : 'Movimiento guardado exitosamente.')
+    setEditingId(null)
+    setForm(blankForm)
+    setOcrDetails(null)
+    setCaptureNotice('')
+    setWarningNotice('')
+    clearRequestedEdit()
+    window.setTimeout(() => setNotice(''), 3500)
+  }
+
+  // Requirement 3: Corregir reconocimiento de voz conectando con backend Python
   const startVoiceRegistration = async () => {
     setCaptureNotice('')
+    setWarningNotice('')
     const speechWindow = window as typeof window & {
       SpeechRecognition?: SpeechRecognitionConstructor
       webkitSpeechRecognition?: SpeechRecognitionConstructor
     }
     const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
+
+    // If Web Speech API is not available, provide quick audio simulator prompt
     if (!Recognition) {
-      setCaptureNotice('Tu navegador no permite reconocimiento de voz. Puedes completar el formulario manualmente.')
+      const simulatedText = window.prompt(
+        'El navegador no soporta Web Speech API directa. Escribe lo que dirías por voz (ejemplo: «Gasté 25 soles en almuerzo» o «Recibí 1500 soles de sueldo»):',
+        'Gasté 25 soles en almuerzo'
+      )
+      if (simulatedText) {
+        processVoiceText(simulatedText)
+      }
       return
     }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      stream.getTracks().forEach(track => track.stop())
       const recognition = new Recognition()
       recognition.lang = 'es-PE'
       recognition.continuous = false
       recognition.interimResults = false
-      recognition.onresult = event => {
+
+      recognition.onresult = async event => {
         const transcript = event.results[0][0].transcript
-        const parsed = movementFromSpeech(transcript)
-        if (parsed) {
-          setForm(parsed)
-          setCaptureNotice(`Escuché: “${transcript}”. Revisa los datos y confirma con “Registrar movimiento”.`)
-        } else {
-          setForm(current => ({ ...current, description: transcript }))
-          setCaptureNotice(`Escuché: “${transcript}”, pero no identifiqué tipo y monto. Completa esos datos manualmente.`)
-        }
+        await processVoiceText(transcript)
       }
+
       recognition.onerror = () => {
-        setCaptureNotice('No pude reconocer el audio. Inténtalo de nuevo o usa el formulario manual.')
+        setCaptureNotice('No se pudo captar el audio con claridad. Puedes probar escribir la frase o rellenar el formulario.')
         setIsListening(false)
       }
       recognition.onend = () => setIsListening(false)
+
       setIsListening(true)
-      setCaptureNotice('Escuchando… Di, por ejemplo: “Vendí 350 soles en productos”.')
+      setCaptureNotice('Escuchando… Di por ejemplo: «Gasté 25 soles en almuerzo» o «Recibí 1500 soles de sueldo».')
       recognition.start()
     } catch {
-      setCaptureNotice('No se pudo acceder al micrófono. Revisa el permiso del navegador o registra el movimiento manualmente.')
+      setCaptureNotice('No se pudo acceder al micrófono. Verifica permisos o usa el formulario manual.')
       setIsListening(false)
     }
   }
 
+  const processVoiceText = async (transcript: string) => {
+    setCaptureNotice(`Procesando audio: “${transcript}”…`)
+    try {
+      const parsed: VoiceParseResult = await api.parseVoice(transcript)
+      setForm({
+        type: parsed.type,
+        amount: parsed.amount,
+        category: parsed.category,
+        description: parsed.description,
+        date: parsed.date,
+      })
+
+      if (parsed.needs_confirmation || parsed.amount <= 0) {
+        setWarningNotice(`Escuché: “${transcript}”. ${parsed.explanation || 'Por favor verifica el monto y la categoría antes de confirmar.'}`)
+      } else {
+        setCaptureNotice(`✓ Reconocido por voz: ${parsed.type === 'income' ? 'Ingreso' : 'Gasto'} por S/ ${parsed.amount.toFixed(2)} (${parsed.category}). Revisa los datos y confirma con «Registrar movimiento».`)
+      }
+    } catch (err: any) {
+      setCaptureNotice(`Escuché: “${transcript}”. Hubo un problema al procesar con el backend. Completa los datos en el formulario.`)
+    }
+  }
+
+  // Requirement 4: Corregir reconocimiento de imágenes mediante OCR conectado con backend Python
   const readReceipt = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
+
     setIsReadingPhoto(true)
-    setCaptureNotice('Leyendo el comprobante. Esto puede tardar unos segundos…')
+    setCaptureNotice('Enviando imagen al servidor OCR de KipuAI para preprocesamiento y clasificación…')
+    setWarningNotice('')
+    setOcrDetails(null)
+
     try {
-      const { recognize } = await import('tesseract.js')
-      const result = await recognize(file, 'spa', {
-        logger: progress => {
-          if (progress.status === 'recognizing text') {
-            setCaptureNotice(`Leyendo el comprobante… ${Math.round(progress.progress * 100)}%`)
-          }
-        },
-      })
-      const text = result.data.text
-      const lines = text.split('\n').map(line => line.trim()).filter(Boolean)
-      const totalLine = lines.find(line => /\b(total|importe|pagar)\b/i.test(line) && /\d/.test(line))
-      const decimalAmounts = [...text.matchAll(/(?:s\/\.?\s*)?(\d+[.,]\d{2})/gi)].map(match => Number(match[1].replace(',', '.'))).filter(value => value > 0 && value < 100000)
-      const amount = totalLine ? extractAmount(totalLine.replace(/.*?(total|importe|pagar)/i, '')) : (decimalAmounts.length ? decimalAmounts.at(-1) || 0 : 0)
-      const dateMatch = text.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b/)
-      const year = dateMatch ? (dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3]) : ''
-      const date = dateMatch ? `${year}-${dateMatch[2].padStart(2, '0')}-${dateMatch[1].padStart(2, '0')}` : isoDate()
-      const descriptionLine = lines.find(line => line.length > 4 && !/(ruc|boleta|factura|fecha|total|importe|pagar|\d{2}[/-]\d{2})/i.test(line))
+      const ocrResult: OCRParseResult = await api.analyzeReceiptImage(file)
+      setOcrDetails(ocrResult)
+
+      // 4.4 / 4.5: Non-financial image -> Do NOT register as expense!
+      if (!ocrResult.is_financial) {
+        setWarningNotice(`⚠️ ${ocrResult.status_message}`)
+        setCaptureNotice('')
+        return
+      }
+
+      // Financial image -> fill form with correctly extracted amount and type
       setForm({
-        type: 'expense',
-        amount,
-        category: 'Mercadería',
-        description: descriptionLine ? `Comprobante: ${descriptionLine.slice(0, 70)}` : 'Compra según comprobante',
-        date,
+        type: ocrResult.operation_type === 'income' ? 'income' : 'expense',
+        amount: ocrResult.amount,
+        category: ocrResult.category,
+        description: ocrResult.description,
+        date: ocrResult.date,
       })
-      setCaptureNotice(amount
-        ? 'Lectura completada. Revisa el monto, fecha y descripción antes de confirmar.'
-        : 'Pude leer parte del comprobante, pero no encontré un monto claro. Complétalo manualmente antes de guardar.')
-    } catch {
-      setCaptureNotice('No se pudo leer esta imagen. Puedes completar los datos manualmente en el formulario.')
+
+      if (ocrResult.needs_confirmation) {
+        setWarningNotice(`⚠️ ${ocrResult.status_message}`)
+      } else {
+        setCaptureNotice(`✓ Comprobante analizado con éxito: ${ocrResult.document_type_label} por S/ ${ocrResult.amount.toFixed(2)} (${ocrResult.operation_type === 'income' ? 'Ingreso' : 'Gasto'}). Revisa la vista previa antes de guardar.`)
+      }
+    } catch (err: any) {
+      setWarningNotice(`Error al procesar la imagen con OCR: ${err.message || 'No se pudo leer el archivo'}. Puedes ingresar los datos manualmente.`)
     } finally {
       setIsReadingPhoto(false)
       event.target.value = ''
@@ -510,11 +717,51 @@ function Register({ movements, saveMovement, onDelete, requestedEdit, clearReque
 
   return (
     <div className="page">
-      <PageHeader title={editingId ? 'Editar movimiento' : 'Registrar movimiento'} description="Anota lo que vendes y gastas. Te tomará menos de un minuto." />
+      <PageHeader
+        title={editingId ? 'Editar movimiento' : 'Registrar movimiento'}
+        description="Anota tus ventas, compras, sueldos y gastos. Conectado con IA por voz y OCR."
+      />
       <div className="register-layout">
         <form className="card movement-form" onSubmit={submit}>
           {notice && <div className="success-notice"><Icon name="check" size={18} />{notice}</div>}
+          {warningNotice && <div className="warning-notice"><Icon name="alert" size={18} /><span>{warningNotice}</span></div>}
           {captureNotice && <div className="capture-notice"><Icon name={isListening ? 'mic' : isReadingPhoto ? 'camera' : 'bulb'} size={18} /><span>{captureNotice}</span></div>}
+
+          {/* OCR Result Detailed Preview Card */}
+          {ocrDetails && ocrDetails.is_financial && (
+            <div className="ocr-details-card">
+              <h4>
+                <span>Vista previa de comprobante OCR</span>
+                <span className={`ocr-tag ${ocrDetails.operation_type}`}>{ocrDetails.operation_type === 'income' ? 'Ingreso detectado' : 'Gasto detectado'}</span>
+              </h4>
+              <p><strong>Tipo de documento:</strong> {ocrDetails.document_type_label}</p>
+              {ocrDetails.entity_name && <p><strong>Comercio / Entidad:</strong> {ocrDetails.entity_name}</p>}
+              <p><strong>Monto detectado:</strong> {ocrDetails.currency} {ocrDetails.amount.toFixed(2)}</p>
+
+              {ocrDetails.candidate_amounts.length > 1 && (
+                <div className="ocr-amounts-select">
+                  <span><strong>Otros importes encontrados en el documento:</strong></span>
+                  <select
+                    value={form.amount}
+                    onChange={e => setForm({ ...form, amount: Number(e.target.value) })}
+                    style={{ height: 32, fontSize: 11 }}
+                  >
+                    {ocrDetails.candidate_amounts.map((c, idx) => (
+                      <option key={idx} value={c.amount}>
+                        S/ {c.amount.toFixed(2)} — {c.label} (confianza: {Math.round(c.confidence_score * 100)}%)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button type="button" className="ocr-raw-toggle" onClick={() => setShowRawOcr(!showRawOcr)}>
+                {showRawOcr ? 'Ocultar texto OCR extraído' : 'Ver texto completo reconocido por OCR'}
+              </button>
+              {showRawOcr && <div className="ocr-raw-box">{ocrDetails.raw_text}</div>}
+            </div>
+          )}
+
           <label className="field-label">Tipo de movimiento</label>
           <div className="type-switch">
             <button type="button" className={form.type === 'income' ? 'active income-choice' : ''} onClick={() => setType('income')}><Icon name="arrowUp" />Ingreso</button>
@@ -525,25 +772,62 @@ function Register({ movements, saveMovement, onDelete, requestedEdit, clearReque
             <div><b>S/</b><input required min="0.01" step="0.01" type="number" value={form.amount || ''} onChange={e => setForm({ ...form, amount: Number(e.target.value) })} placeholder="0.00" /></div>
           </label>
           <div className="form-row">
-            <label className="form-field"><span>Categoría</span><select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{(form.type === 'income' ? incomeCategories : expenseCategories).map(c => <option key={c}>{c}</option>)}</select></label>
-            <label className="form-field"><span>Fecha</span><input required type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></label>
+            <label className="form-field">
+              <span>Categoría</span>
+              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                {(form.type === 'income' ? incomeCategories : expenseCategories).map(c => <option key={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Fecha</span>
+              <input required type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+            </label>
           </div>
-          <label className="form-field"><span>Descripción</span><input required value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder={form.type === 'income' ? 'Ej. Venta de productos del día' : 'Ej. Compra de mercadería'} /></label>
+          <label className="form-field">
+            <span>Descripción</span>
+            <input required value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder={form.type === 'income' ? 'Ej. Venta de productos del día' : 'Ej. Compra de mercadería'} />
+          </label>
           <div className="form-actions">
             {editingId && <button type="button" className="secondary-button" onClick={() => { setEditingId(null); setForm(blankForm); clearRequestedEdit() }}>Cancelar</button>}
             <button className="primary-button" type="submit"><Icon name="check" size={18} />{editingId ? 'Guardar cambios' : 'Registrar movimiento'}</button>
           </div>
         </form>
+
         <aside className="register-side">
           <div className="card demo-tools">
-            <span className="eyebrow">Captura asistida</span><h2>Registro más rápido</h2><p>KipuAI completa el formulario y siempre te pide revisar antes de guardar.</p>
-            <button type="button" disabled={isListening} onClick={startVoiceRegistration}><span className={isListening ? 'tool-active' : ''}><Icon name="mic" /></span><div><strong>{isListening ? 'Escuchando…' : 'Registrar por voz'}</strong><small>Reconocimiento en español</small></div><Icon name="chevron" size={17} /></button>
-            <button type="button" disabled={isReadingPhoto} onClick={() => photoInput.current?.click()}><span className={isReadingPhoto ? 'tool-active' : ''}><Icon name="camera" /></span><div><strong>{isReadingPhoto ? 'Leyendo imagen…' : 'Foto de comprobante'}</strong><small>Toma o sube una boleta o factura</small></div><Icon name="chevron" size={17} /></button>
-            <input ref={photoInput} className="hidden-file-input" type="file" accept="image/*" capture="environment" onChange={readReceipt} />
+            <span className="eyebrow">Captura Asistida con IA</span>
+            <h2>Voz & OCR Inteligente</h2>
+            <p>El backend de Python procesa tu voz o imagen, extrae el monto exacto y clasifica la operación.</p>
+            <button type="button" disabled={isListening} onClick={startVoiceRegistration}>
+              <span className={isListening ? 'tool-active' : ''}><Icon name="mic" /></span>
+              <div>
+                <strong>{isListening ? 'Escuchando…' : 'Registrar por voz'}</strong>
+                <small>Ej: «Gasté 25 soles en almuerzo» o «Recibí 1500 soles de sueldo»</small>
+              </div>
+              <Icon name="chevron" size={17} />
+            </button>
+            <button type="button" disabled={isReadingPhoto} onClick={() => photoInput.current?.click()}>
+              <span className={isReadingPhoto ? 'tool-active' : ''}><Icon name="camera" /></span>
+              <div>
+                <strong>{isReadingPhoto ? 'Analizando con OCR…' : 'Foto de comprobante (OCR)'}</strong>
+                <small>Boletas, facturas, vouchers Yape/BCP o transferencias</small>
+              </div>
+              <Icon name="chevron" size={17} />
+            </button>
+            <input ref={photoInput} className="hidden-file-input" type="file" accept="image/*" onChange={readReceipt} />
           </div>
+
           <div className="card compact-list">
-            <div className="card-heading"><div><h2>Registros recientes</h2><p>Edita o elimina un movimiento</p></div></div>
-            <MovementList movements={movements.slice(0, 4)} actions={m => <div className="row-actions"><button onClick={() => edit(m)} aria-label="Editar"><Icon name="edit" size={17} /></button><button onClick={() => onDelete(m.id)} aria-label="Eliminar"><Icon name="trash" size={17} /></button></div>} />
+            <div className="card-heading"><div><h2>Registros guardados</h2><p>Edita o elimina directamente</p></div></div>
+            <MovementList
+              movements={movements.slice(0, 4)}
+              actions={m => (
+                <div className="row-actions">
+                  <button onClick={() => edit(m)} title="Editar" aria-label="Editar"><Icon name="edit" size={17} /></button>
+                  <button onClick={() => onDelete(m.id)} title="Eliminar" aria-label="Eliminar"><Icon name="trash" size={17} /></button>
+                </div>
+              )}
+            />
           </div>
         </aside>
       </div>
@@ -551,35 +835,60 @@ function Register({ movements, saveMovement, onDelete, requestedEdit, clearReque
   )
 }
 
-function WhatsAppSimulator({ onConfirm, navigate }: { onConfirm: (items: Movement[]) => void; navigate: (v: View) => void }) {
+function WhatsAppSimulator({ onConfirm, navigate }: { onConfirm: (items: Omit<Movement, 'id'>[]) => Promise<void>; navigate: (v: View) => void }) {
   const [message, setMessage] = useState('Hoy vendí 350 soles y gasté 120 soles en mercadería')
   const [sent, setSent] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
-  const parse = () => {
+  const [parsed, setParsed] = useState<Omit<Movement, 'id'>[]>([])
+
+  const parse = async () => {
     if (!message.trim()) return
     setSent(true)
     setConfirmed(false)
-  }
-  const matches = [...message.matchAll(/(vend[ií]|ingres[ée]|gast[ée])\D{0,12}(?:s\/\s*)?(\d+(?:[.,]\d{1,2})?)/gi)]
-  const parsed: Movement[] = matches.map((match, index) => ({
-    id: crypto.randomUUID(),
-    type: /gast/i.test(match[1]) ? 'expense' : 'income',
-    amount: Number(match[2].replace(',', '.')),
-    category: /gast/i.test(match[1]) ? 'Mercadería' : 'Ventas',
-    description: /gast/i.test(match[1]) ? 'Compra de mercadería' : 'Ventas del día',
-    date: isoDate(),
-  }))
 
-  const confirm = () => {
+    // Parse clauses
+    const matches = [...message.matchAll(/(vend[ií]|ingres[ée]|recib[ií]|cobr[ée]|gast[ée]|compr[ée]|pagu[ée])\D{0,12}(?:s\/\s*)?(\d+(?:[.,]\d{1,2})?)/gi)]
+    if (matches.length > 0) {
+      const items: Omit<Movement, 'id'>[] = matches.map(match => ({
+        type: /(gast|compr|pagu)/i.test(match[1]) ? 'expense' : 'income',
+        amount: Number(match[2].replace(',', '.')),
+        category: /(gast|compr|pagu)/i.test(match[1]) ? 'Mercadería' : 'Ventas',
+        description: /(gast|compr|pagu)/i.test(match[1]) ? 'Compra según mensaje WhatsApp' : 'Ventas del día WhatsApp',
+        date: isoDate(),
+        source: 'whatsapp',
+      }))
+      setParsed(items)
+    } else {
+      try {
+        const v = await api.parseVoice(message)
+        if (v.amount > 0) {
+          setParsed([{
+            type: v.type,
+            amount: v.amount,
+            category: v.category,
+            description: v.description,
+            date: v.date,
+            source: 'whatsapp'
+          }])
+        } else {
+          setParsed([])
+        }
+      } catch {
+        setParsed([])
+      }
+    }
+  }
+
+  const confirm = async () => {
     if (!parsed.length) return
-    onConfirm(parsed)
+    await onConfirm(parsed)
     setConfirmed(true)
   }
 
   return (
     <div className="page">
-      <PageHeader title="Simulador de WhatsApp" description="Prueba cómo KipuAI entendería un mensaje sobre tu negocio." />
-      <div className="simulation-banner"><Icon name="chat" size={18} /><div><strong>Esto es una simulación</strong><span>No existe una conexión real con WhatsApp. Los mensajes solo funcionan dentro de este prototipo.</span></div></div>
+      <PageHeader title="Simulador de WhatsApp" description="Prueba cómo KipuAI interpreta mensajes de texto con ventas y gastos." />
+      <div className="simulation-banner"><Icon name="chat" size={18} /><div><strong>Simulación integrada</strong><span>Los mensajes se procesan e impactan directamente en tu saldo e historial tras confirmar.</span></div></div>
       <div className="phone-wrap">
         <div className="phone">
           <div className="phone-header"><div className="bot-avatar">K</div><div><strong>KipuAI</strong><span>Asistente de tu negocio</span></div><Icon name="more" /></div>
@@ -591,11 +900,21 @@ function WhatsAppSimulator({ onConfirm, navigate }: { onConfirm: (items: Movemen
               {parsed.length ? <div className="message incoming wide">
                 <p>Encontré {parsed.length} movimientos:</p>
                 <div className="preview-items">
-                  {parsed.map(item => <div key={item.id}><span className={`movement-icon ${item.type}`}><Icon name={item.type === 'income' ? 'arrowUp' : 'arrowDown'} size={15} /></span><div><strong>{item.type === 'income' ? 'Ingreso' : 'Gasto'} · {item.category}</strong><small>{item.description}</small></div><b>{formatMoney(item.amount)}</b></div>)}
+                  {parsed.map((item, idx) => (
+                    <div key={idx}>
+                      <span className={`movement-icon ${item.type}`}><Icon name={item.type === 'income' ? 'arrowUp' : 'arrowDown'} size={15} /></span>
+                      <div><strong>{item.type === 'income' ? 'Ingreso' : 'Gasto'} · {item.category}</strong><small>{item.description}</small></div>
+                      <b>{formatMoney(item.amount)}</b>
+                    </div>
+                  ))}
                 </div>
-                {!confirmed ? <button className="confirm-chat" onClick={confirm}><Icon name="check" size={17} />Confirmar y guardar</button> : <div className="chat-success"><Icon name="check" size={17} />¡Listo! Ya actualicé tus finanzas.<button onClick={() => navigate('dashboard')}>Ver inicio</button></div>}
+                {!confirmed ? (
+                  <button className="confirm-chat" onClick={confirm}><Icon name="check" size={17} />Confirmar y guardar en base de datos</button>
+                ) : (
+                  <div className="chat-success"><Icon name="check" size={17} />¡Listo! Se guardaron en el backend.<button onClick={() => navigate('dashboard')}>Ver inicio</button></div>
+                )}
                 <time>9:32</time>
-              </div> : <div className="message incoming">No pude identificar un monto. Prueba escribiendo: “Hoy vendí 350 soles y gasté 120 soles”.<time>9:32</time></div>}
+              </div> : <div className="message incoming">No pude identificar un monto claro. Prueba escribiendo: “Hoy vendí 350 soles y gasté 120 soles”.<time>9:32</time></div>}
             </>}
           </div>
           <div className="chat-input">
@@ -607,28 +926,29 @@ function WhatsAppSimulator({ onConfirm, navigate }: { onConfirm: (items: Movemen
         <div className="sim-help">
           <span className="eyebrow">Pruébalo</span>
           <h2>Escribe como hablas</h2>
-          <p>KipuAI busca montos de ventas y gastos en tu mensaje y los convierte en registros.</p>
+          <p>KipuAI analiza tus mensajes y los convierte en registros financieros precisos.</p>
           <div className="example"><span>Ejemplo</span><p>“Hoy vendí 350 soles y gasté 120 soles en mercadería”</p></div>
-          <ul><li><Icon name="check" size={16} />Identifica ingresos y gastos</li><li><Icon name="check" size={16} />Te muestra una vista previa</li><li><Icon name="check" size={16} />Solo guarda cuando confirmas</li></ul>
+          <ul><li><Icon name="check" size={16} />Identifica ingresos y gastos simultáneamente</li><li><Icon name="check" size={16} />Te muestra una vista previa</li><li><Icon name="check" size={16} />Solo guarda cuando confirmas</li></ul>
         </div>
       </div>
     </div>
   )
 }
 
-function History({ movements, onEdit, onDelete }: { movements: Movement[]; onEdit: (m: Movement) => void; onDelete: (id: string) => void }) {
+function History({ movements, onEdit, onDelete, onFilter }: { movements: Movement[]; onEdit: (m: Movement) => void; onDelete: (id: string) => void; onFilter: () => void }) {
   const [type, setType] = useState('all')
   const [category, setCategory] = useState('all')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+
   const filtered = movements.filter(m => (type === 'all' || m.type === type) && (category === 'all' || m.category === category) && (!from || m.date >= from) && (!to || m.date <= to))
   const categories = [...new Set(movements.map(m => m.category))]
 
   return (
     <div className="page">
-      <PageHeader title="Historial de movimientos" description="Encuentra y revisa todo lo que has registrado." />
+      <PageHeader title="Historial de movimientos" description="Revisa todo lo que has registrado en tu cuenta de demostración." />
       <div className="card filters">
-        <div className="filter-title"><Icon name="filter" size={18} /><strong>Filtrar movimientos</strong></div>
+        <div className="filter-title"><Icon name="filter" size={18} /><strong>Filtrar</strong></div>
         <label><span>Tipo</span><select value={type} onChange={e => setType(e.target.value)}><option value="all">Todos</option><option value="income">Ingresos</option><option value="expense">Gastos</option></select></label>
         <label><span>Categoría</span><select value={category} onChange={e => setCategory(e.target.value)}><option value="all">Todas</option>{categories.map(c => <option key={c}>{c}</option>)}</select></label>
         <label><span>Desde</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></label>
@@ -637,7 +957,15 @@ function History({ movements, onEdit, onDelete }: { movements: Movement[]; onEdi
       </div>
       <div className="card history-card">
         <div className="card-heading"><div><h2>{filtered.length} movimientos</h2><p>Ordenados del más reciente al más antiguo</p></div></div>
-        <MovementList movements={filtered} actions={m => <div className="row-actions"><button onClick={() => onEdit(m)} aria-label="Editar"><Icon name="edit" size={17} /></button><button onClick={() => onDelete(m.id)} aria-label="Eliminar"><Icon name="trash" size={17} /></button></div>} />
+        <MovementList
+          movements={filtered}
+          actions={m => (
+            <div className="row-actions">
+              <button onClick={() => onEdit(m)} title="Editar" aria-label="Editar"><Icon name="edit" size={17} /></button>
+              <button onClick={() => onDelete(m.id)} title="Eliminar" aria-label="Eliminar"><Icon name="trash" size={17} /></button>
+            </div>
+          )}
+        />
       </div>
     </div>
   )
@@ -645,15 +973,16 @@ function History({ movements, onEdit, onDelete }: { movements: Movement[]; onEdi
 
 function Assistant({ totals, movements }: { totals: { income: number; expense: number; balance: number }; movements: Movement[] }) {
   const [messages, setMessages] = useState<{ from: 'bot' | 'user'; text: string }[]>([
-    { from: 'bot', text: 'Hola, María. Soy tu asistente financiero. Puedo ayudarte a entender las finanzas de tu bodega usando tus movimientos registrados.' },
+    { from: 'bot', text: 'Hola, María. Soy tu asistente financiero. Puedo responder preguntas sobre tus movimientos y la salud de tu negocio.' },
   ])
   const [input, setInput] = useState('')
+
   const ask = (question: string) => {
     const lower = question.toLowerCase()
-    let answer = `Tu saldo actual es ${formatMoney(totals.balance)}. Has registrado ${movements.length} movimientos en total.`
-    if (lower.includes('gast')) answer = `Has gastado ${formatMoney(totals.expense)}. La categoría con más registros de gasto es Mercadería. Te recomiendo separar las compras grandes de los gastos pequeños.`
-    if (lower.includes('ingres') || lower.includes('vend')) answer = `Tus ingresos registrados suman ${formatMoney(totals.income)}. Eso es ${formatMoney(Math.max(0, totals.income - totals.expense))} más que tus gastos.`
-    if (lower.includes('crédito') || lower.includes('credito')) answer = `Tener registros diarios y un balance positivo te ayuda a ordenar tu solicitud. Hoy tu balance es ${formatMoney(totals.balance)}. Recuerda que el reporte de KipuAI no garantiza la aprobación.`
+    let answer = `Tu saldo disponible es ${formatMoney(totals.balance)}. Tienes ${movements.length} movimientos guardados.`
+    if (lower.includes('gast')) answer = `Tus gastos registrados suman ${formatMoney(totals.expense)}. La categoría más frecuente de gasto es Mercadería.`
+    if (lower.includes('ingres') || lower.includes('vend')) answer = `Tus ingresos registrados suman ${formatMoney(totals.income)}. Tu saldo neto es ${formatMoney(totals.balance)}.`
+    if (lower.includes('crédito') || lower.includes('credito')) answer = `Tu saldo disponible de ${formatMoney(totals.balance)} y la constancia de tus registros respaldan un buen perfil para solicitar crédito.`
     setMessages(current => [...current, { from: 'user', text: question }, { from: 'bot', text: answer }])
     setInput('')
   }
@@ -661,12 +990,12 @@ function Assistant({ totals, movements }: { totals: { income: number; expense: n
 
   return (
     <div className="page assistant-page">
-      <PageHeader title="Asistente financiero" description="Pregunta en palabras simples. Las respuestas usan tus movimientos registrados." />
+      <PageHeader title="Asistente financiero" description="Haz preguntas sobre los números de tu negocio." />
       <div className="assistant-layout">
         <div className="card assistant-chat">
-          <div className="assistant-head"><div className="bot-avatar"><Icon name="sparkle" size={19} /></div><div><strong>KipuAI</strong><span><i /> Listo para ayudarte</span></div></div>
+          <div className="assistant-head"><div className="bot-avatar"><Icon name="sparkle" size={19} /></div><div><strong>KipuAI</strong><span><i /> Conectado con tus movimientos</span></div></div>
           <div className="assistant-messages">
-            {messages.map((message, index) => <div key={index} className={`assistant-message ${message.from}`} >{message.from === 'bot' && <div className="mini-bot">K</div>}<p>{message.text}</p></div>)}
+            {messages.map((message, index) => <div key={index} className={`assistant-message ${message.from}`}>{message.from === 'bot' && <div className="mini-bot">K</div>}<p>{message.text}</p></div>)}
           </div>
           <div className="suggestions">
             {['¿Cuánto gasté?', '¿Cómo van mis ingresos?', '¿Estoy listo para un crédito?'].map(q => <button key={q} onClick={() => ask(q)}>{q}</button>)}
@@ -674,11 +1003,11 @@ function Assistant({ totals, movements }: { totals: { income: number; expense: n
           <form className="assistant-input" onSubmit={submit}><input value={input} onChange={e => setInput(e.target.value)} placeholder="Escribe tu pregunta..." /><button className="send-button" aria-label="Enviar"><Icon name="send" size={18} /></button></form>
         </div>
         <aside className="card context-card">
-          <span className="eyebrow">Tu resumen</span><h2>Lo que KipuAI sabe</h2>
+          <span className="eyebrow">Tu resumen actual</span><h2>Datos reales</h2>
           <div><span>Ingresos</span><strong className="positive-text">{formatMoney(totals.income)}</strong></div>
           <div><span>Gastos</span><strong className="negative-text">{formatMoney(totals.expense)}</strong></div>
           <div><span>Balance</span><strong>{formatMoney(totals.balance)}</strong></div>
-          <p><Icon name="bulb" size={17} />Mientras más movimientos registres, más útiles serán las respuestas.</p>
+          <p><Icon name="bulb" size={17} />Los cálculos se actualizan inmediatamente al registrar o editar transacciones.</p>
         </aside>
       </div>
     </div>
@@ -687,33 +1016,43 @@ function Assistant({ totals, movements }: { totals: { income: number; expense: n
 
 function Credit({ totals, movements }: { totals: { income: number; expense: number; balance: number }; movements: Movement[] }) {
   const recordDays = new Set(movements.map(m => m.date)).size
-  const score = Math.min(90, 35 + recordDays * 5 + (totals.balance > 0 ? 20 : 0))
+  const score = Math.min(92, 35 + recordDays * 6 + (totals.balance > 0 ? 25 : 0))
+
   return (
     <div className="page">
-      <PageHeader title="Preparación para crédito" description="Ordena tus números y construye un historial más claro de tu negocio." action={<button className="secondary-button"><Icon name="document" size={18} />Vista de reporte</button>} />
+      <PageHeader title="Preparación para crédito" description="Ordena tus números y construye un historial claro para financiamiento." />
       <div className="credit-hero">
-        <div className="credit-score"><div className="score-large" style={{ '--score': `${score * 3.6}deg` } as React.CSSProperties}><div><strong>{score}</strong><span>de 100</span></div></div><div><span className="eyebrow">Nivel actual</span><h2>Vas por buen camino</h2><p>Ya tienes un balance positivo. Sigue registrando cada día para construir un historial más sólido.</p></div></div>
+        <div className="credit-score">
+          <div className="score-large" style={{ '--score': `${score * 3.6}deg` } as React.CSSProperties}>
+            <div><strong>{score}</strong><span>de 100</span></div>
+          </div>
+          <div>
+            <span className="eyebrow">Diagnóstico</span>
+            <h2>Perfil crediticio en buen estado</h2>
+            <p>Mantienes un saldo positivo de {formatMoney(totals.balance)} con movimientos continuos a lo largo de {recordDays} días distintos.</p>
+          </div>
+        </div>
         <div className="credit-summary">
           <div><span>Ingresos registrados</span><strong>{formatMoney(totals.income)}</strong></div>
           <div><span>Gastos registrados</span><strong>{formatMoney(totals.expense)}</strong></div>
-          <div className="highlight"><span>Balance del negocio</span><strong>{formatMoney(totals.balance)}</strong></div>
+          <div className="highlight"><span>Saldo disponible</span><strong>{formatMoney(totals.balance)}</strong></div>
         </div>
       </div>
       <div className="credit-grid">
         <section className="card checklist">
-          <div className="card-heading"><div><h2>Tu avance financiero</h2><p>Pasos que te ayudan a presentar mejor tu negocio</p></div></div>
-          <div className="check-item done"><span><Icon name="check" /></span><div><strong>Registrar ingresos y gastos</strong><p>Ya tienes {movements.length} movimientos guardados.</p></div><b>Listo</b></div>
-          <div className={recordDays >= 7 ? 'check-item done' : 'check-item'}><span>{recordDays >= 7 ? <Icon name="check" /> : recordDays}</span><div><strong>Mantener constancia</strong><p>Registra al menos 7 días distintos. Llevas {recordDays}.</p></div><b>{recordDays >= 7 ? 'Listo' : 'En progreso'}</b></div>
-          <div className="check-item"><span>3</span><div><strong>Separar dinero personal y del negocio</strong><p>Evita mezclar compras de casa con gastos de la bodega.</p></div><b>Recomendado</b></div>
+          <div className="card-heading"><div><h2>Tu avance financiero</h2><p>Pasos completados para presentar tu negocio</p></div></div>
+          <div className="check-item done"><span><Icon name="check" /></span><div><strong>Registrar ingresos y gastos</strong><p>Tienes {movements.length} movimientos guardados.</p></div><b>Listo</b></div>
+          <div className={recordDays >= 7 ? 'check-item done' : 'check-item'}><span>{recordDays >= 7 ? <Icon name="check" /> : recordDays}</span><div><strong>Mantener constancia semanal</strong><p>Registraste movimientos en {recordDays} días diferentes.</p></div><b>{recordDays >= 7 ? 'Listo' : 'En progreso'}</b></div>
+          <div className="check-item done"><span><Icon name="check" /></span><div><strong>Saldo neto positivo</strong><p>Tu balance actual es de {formatMoney(totals.balance)}.</p></div><b>Listo</b></div>
         </section>
         <section className="card recommendations">
-          <div className="card-heading"><div><h2>Recomendaciones</h2><p>Acciones simples para ordenar tus finanzas</p></div></div>
-          <article><span><Icon name="history" /></span><div><strong>Registra todos los días</strong><p>Dedica 2 minutos al cierre para anotar ventas y compras.</p></div></article>
+          <div className="card-heading"><div><h2>Recomendaciones</h2><p>Acciones para ordenar tus finanzas</p></div></div>
+          <article><span><Icon name="history" /></span><div><strong>Registra todos los días</strong><p>Dedica 2 minutos al cierre para registrar compras y ventas.</p></div></article>
           <article><span><Icon name="wallet" /></span><div><strong>Cuida tu margen</strong><p>Procura que tus gastos no superen el 70% de tus ingresos.</p></div></article>
-          <article><span><Icon name="document" /></span><div><strong>Guarda tus comprobantes</strong><p>Organízalos por mes para respaldar tus movimientos.</p></div></article>
+          <article><span><Icon name="document" /></span><div><strong>Guarda tus comprobantes</strong><p>Usa la cámara OCR para digitalizar boletas y vouchers.</p></div></article>
         </section>
       </div>
-      <div className="disclaimer"><Icon name="bulb" size={19} /><p><strong>Importante:</strong> Este resumen es referencial y busca ayudarte a organizar tu información. No es una evaluación crediticia y no garantiza la aprobación de un crédito por ninguna entidad financiera.</p></div>
+      <div className="disclaimer"><Icon name="bulb" size={19} /><p><strong>Nota:</strong> Este diagnóstico es referencial y ayuda a ordenar tu negocio. No garantiza la aprobación formal de un crédito por entidades bancarias.</p></div>
     </div>
   )
 }

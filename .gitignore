@@ -19,3 +19,12 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+
+# Python & SQLite
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.db
+backend/kipu.db
+backend/.env
